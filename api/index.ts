@@ -48,7 +48,7 @@ app.post('/api/ai/advice', async (req, res) => {
     if (!ai) return res.status(400).json({ error: 'GEMINI_API_KEY missing', advice: defaultAdvice[lang] });
     const langName = lang === 'uk' ? 'українською мовою' : lang === 'en' ? 'English' : 'русском языке';
     const promptText = 'Ты - финансовый консультант в приложении "Финансы PRO". Период: ' + (period || 'месяц') + ', Валюта: ' + (currency || 'UAH') + ', Доходы: ' + (income || 0) + ', Расходы: ' + (expense || 0) + ', Долг: ' + (debt || 0) + ', Счетов: ' + (accountsCount || 0) + '. Дай 3 коротких практических финансовых совета НА ' + langName.toUpperCase() + '. Оформи как 3 нумерованных пункта.';
-    const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: promptText });
+    const response = await ai.models.generateContent({ model: 'gemini-2.0-flash', contents: promptText });
     res.json({ success: true, advice: (response.text || defaultAdvice[lang]).trim() });
   } catch (error: any) {
     const lang = (req.body?.language === 'en' ? 'en' : req.body?.language === 'ru' ? 'ru' : 'uk') as 'uk' | 'en' | 'ru';
@@ -69,7 +69,7 @@ app.post('/api/ai/chat', async (req, res) => {
     const li: Record<string, string> = { uk: 'Відповідай УКРАЇНСЬКОЮ!', en: 'Respond in ENGLISH!', ru: 'Отвечай на РУССКОМ!' };
     const hist = (messages || []).map((m: any) => (m.sender === 'user' ? 'User' : 'Manager') + ': ' + m.text).join('\n\n');
     const prompt = 'Ты финансовый менеджер. ' + ctx + ' ' + li[lang] + ' История:\n' + hist + '\nОтвет:';
-    const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+    const response = await ai.models.generateContent({ model: 'gemini-2.0-flash', contents: prompt });
     res.json({ success: true, reply: (response.text || def[lang]).trim() });
   } catch (error: any) {
     res.status(500).json({ error: error?.message, reply: 'Ошибка' });
@@ -84,7 +84,7 @@ app.post('/api/ai/scan-receipt', async (req, res) => {
     if (!base64Image) return res.status(400).json({ error: 'base64Image required' });
     const promptText = 'Проанализируй кассовый чек или квитанцию. Извлеки: type ("expense" или "income"), amount (число), currency ("UAH" или "USD"), category из [food, transport, shopping, home, fun, health, services, cash, other], note (название заведения/магазина), date (ISO формат, год 2026).';
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: { parts: [{ text: promptText }, { inlineData: { data: base64Image, mimeType: mimeType || 'image/jpeg' } }] },
       config: {
         responseMimeType: 'application/json',
@@ -106,7 +106,7 @@ app.post('/api/ai/scan-multibank', async (req, res) => {
     const imageParts = images.map((img: any) => ({ inlineData: { data: img.data, mimeType: img.mimeType || 'image/jpeg' } }));
     const promptText = 'Проанализируй скриншоты банков. Найди accounts (bank, name, ownBalance, debt, minPayment, currency) и transactions (type, amount, currency, category из [food, transport, shopping, home, fun, health, services, cash, salary, freelance, gift, invest, other], note, date в ISO).';
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: { parts: [{ text: promptText }, ...imageParts] },
       config: {
         responseMimeType: 'application/json',
@@ -127,7 +127,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
     if (!text) return res.status(400).json({ error: 'text required' });
     const promptText = 'Проанализируй текст банковской выписки. Извлеки accounts (bank, name, ownBalance, debt, minPayment, currency) и transactions (type, amount, currency, category из [food, transport, shopping, home, fun, health, services, cash, salary, freelance, gift, invest, other], note, date в ISO). Текст выписки:\n' + text.substring(0, 10000);
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
       config: {
         responseMimeType: 'application/json',
@@ -184,7 +184,7 @@ app.post('/api/sync/apple-wallet-csv', async (req, res) => {
     }
     const promptText = 'Проанализируй Apple Wallet CSV. Извлеки transactions (type, amount, currency, category из [food, transport, shopping, home, fun, health, services, cash, salary, freelance, gift, invest, other], note, date). Выписка:\n' + csvText.substring(0, 15000);
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
       config: { responseMimeType: 'application/json', responseSchema: { type: Type.OBJECT, properties: { transactions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { type: { type: Type.STRING }, amount: { type: Type.NUMBER }, currency: { type: Type.STRING }, category: { type: Type.STRING }, note: { type: Type.STRING }, date: { type: Type.STRING } } } } } } },
     });

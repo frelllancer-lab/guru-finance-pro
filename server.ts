@@ -81,7 +81,7 @@ app.post('/api/ai/advice', async (req, res) => {
 Оформи ответ в виде 3 нумерованных пунктов с конкретными рекомендациями.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
     });
 
@@ -151,7 +151,7 @@ ${langInstructions[lang]}
     const promptText = `${systemPrompt}\n\nИстория диалога:\n${formattedHistory}\n\nДай аргументированный и вдохновляющий ответ Финансового Менеджера.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
     });
 
@@ -196,7 +196,7 @@ app.post('/api/ai/scan-receipt', async (req, res) => {
 6. date: дата и время операции в формате ISO (например "2026-07-28T14:30:00.000Z"), если года нет - используй текущий 2026 год.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: {
         parts: [
           { text: promptText },
@@ -272,7 +272,7 @@ app.post('/api/ai/scan-multibank', async (req, res) => {
    - date: ISO строка даты/времени (например "2026-07-28T12:00:00.000Z")`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: {
         parts: [{ text: promptText }, ...imageParts],
       },
@@ -345,7 +345,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
 ${text.substring(0, 10000)}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
       config: {
         responseMimeType: 'application/json',
@@ -513,7 +513,7 @@ app.post('/api/sync/apple-wallet-csv', async (req, res) => {
 ${csvText.substring(0, 15000)}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: promptText,
       config: {
         responseMimeType: 'application/json',
