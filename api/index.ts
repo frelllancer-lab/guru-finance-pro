@@ -414,6 +414,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
     let extractedText = text || '';
 
     // If we got base64 PDF, extract text server-side using pdf-parse v1 (CJS, works on Vercel)
+    let pdfError = '';
     if (base64Pdf && (!extractedText || extractedText.trim().length < 20)) {
       try {
         const pdfParse = require('pdf-parse');
@@ -421,10 +422,10 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
         const pdfData = await pdfParse(buf);
         if (pdfData && pdfData.text) {
           extractedText = pdfData.text;
-          console.log('pdf-parse extracted', extractedText.length, 'chars,', pdfData.numpages, 'pages');
         }
       } catch (pdfErr: any) {
-        console.error('pdf-parse extraction error:', pdfErr.message || pdfErr);
+        pdfError = pdfErr.message || String(pdfErr);
+        console.error('pdf-parse error:', pdfError);
       }
     }
 
@@ -472,7 +473,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
       }
     }
 
-    res.json({ success: true, data: { accounts: [], transactions: [] }, source: 'empty', extractedTextLength: extractedText.length });
+    res.json({ success: true, data: { accounts: [], transactions: [] }, source: 'empty', extractedTextLength: extractedText.length, pdfError: pdfError || undefined });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || 'PDF scan failed' });
   }
