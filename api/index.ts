@@ -409,22 +409,28 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
   try {
     const { text, base64Pdf } = req.body;
     let extractedText = text || '';
+    const debug: any = { textLen: extractedText.length, hasBase64: !!base64Pdf, base64Len: base64Pdf?.length || 0 };
 
     // If we got base64 PDF, extract text server-side using pdfjs-dist legacy
     if (base64Pdf && (!extractedText || extractedText.trim().length < 20)) {
       try {
         const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+        debug.pdfjsImported = true;
         const buf = Buffer.from(base64Pdf, 'base64');
+        debug.bufSize = buf.length;
         const data = new Uint8Array(buf);
         const pdf = await (pdfjsLib as any).getDocument({ data, useSystemFonts: true, isEvalSupported: false }).promise;
+        debug.numPages = pdf.numPages;
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const content = await page.getTextContent();
           extractedText += content.items.map((it: any) => it.str).join(' ') + '\n';
         }
+        debug.extractedChars = extractedText.length;
         console.log('pdfjs-dist legacy extracted', extractedText.length, 'chars');
-      } catch (pdfErr) {
+      } catch (pdfErr: any) {
         console.error('pdfjs-dist extraction error:', pdfErr);
+        debug.pdfError = pdfErr.message;
       }
     }
 
@@ -472,7 +478,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
       }
     }
 
-    res.json({ success: true, data: { accounts: [], transactions: [] }, source: 'empty', extractedTextLength: extractedText.length });
+    res.json({ success: true, data: { accounts: [], transactions: [] }, source: 'empty', extractedTextLength: extractedText.length, debug });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || 'PDF scan failed' });
   }
