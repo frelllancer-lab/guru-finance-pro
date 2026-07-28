@@ -197,7 +197,7 @@ app.post('/api/ai/scan-receipt', async (req, res) => {
 6. date: дата и время операции в формате ISO (например "2026-07-28T14:30:00.000Z"), если года нет - используй текущий 2026 год.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [
           { text: promptText },
@@ -273,7 +273,7 @@ app.post('/api/ai/scan-multibank', async (req, res) => {
    - date: ISO строка даты/времени (например "2026-07-28T12:00:00.000Z")`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [{ text: promptText }, ...imageParts],
       },
@@ -346,7 +346,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
 ${text.substring(0, 10000)}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents: promptText,
       config: {
         responseMimeType: 'application/json',
@@ -514,7 +514,7 @@ app.post('/api/sync/apple-wallet-csv', async (req, res) => {
 ${csvText.substring(0, 15000)}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents: promptText,
       config: {
         responseMimeType: 'application/json',
