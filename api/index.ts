@@ -311,39 +311,54 @@ app.post('/api/ai/scan-multibank', async (req, res) => {
 
 app.post('/api/ai/scan-pdf', async (req, res) => {
   try {
-    const { text } = req.body;
-    if (!text) return res.status(400).json({ error: 'text required' });
+    const { text, base64Pdf } = req.body;
 
-    const regexResult = parseBankStatement(text);
-    if (regexResult.transactions.length > 0) {
-      return res.json({
-        success: true,
-        data: { accounts: regexResult.accounts, transactions: regexResult.transactions },
-        source: 'regex',
-        bank: regexResult.bank,
-      });
+    if (text && text.trim().length > 20) {
+      const regexResult = parseBankStatement(text);
+      if (regexResult.transactions.length > 0) {
+        return res.json({
+          success: true,
+          data: { accounts: regexResult.accounts, transactions: regexResult.transactions },
+          source: 'regex',
+          bank: regexResult.bank,
+        });
+      }
+
+      const promptText = 'Проанализируй текст банковской выписки. Извлеки JSON: {"accounts":[{"bank":"","name":"","ownBalance":0,"debt":0,"minPayment":0,"currency":"UAH"}],"transactions":[{"type":"expense или income","amount":0,"currency":"UAH","category":"из food transport shopping home fun health services cash salary freelance gift invest other","note":"","date":"ISO"}]} Текст:\n' + text.substring(0, 8000);
+      const groqResult = await groqChatJson(promptText);
+      if (groqResult && (groqResult.transactions?.length > 0 || groqResult.accounts?.length > 0)) {
+        return res.json({ success: true, data: groqResult, source: 'groq' });
+      }
     }
 
-    const promptText = 'Проанализируй текст банковской выписки. Извлеки JSON: {"accounts":[{"bank":"","name":"","ownBalance":0,"debt":0,"minPayment":0,"currency":"UAH"}],"transactions":[{"type":"expense или income","amount":0,"currency":"UAH","category":"из food transport shopping home fun health services cash salary freelance gift invest other","note":"","date":"ISO"}]} Текст:\n' + text.substring(0, 8000);
-    const groqResult = await groqChatJson(promptText);
-    if (groqResult && (groqResult.transactions?.length > 0 || groqResult.accounts?.length > 0)) {
-      return res.json({ success: true, data: groqResult, source: 'groq' });
+    if (base64Pdf) {
+      const ai = getGeminiClient();
+      if (ai) {
+        try {
+          const promptPdf = 'Проанализируй банковскую выписку (PDF). Извлеки accounts (bank, name, ownBalance, debt, minPayment, currency) и transactions (type, amount, currency, category из food transport shopping home fun health services cash salary freelance gift invest other, note, date в ISO). Верни JSON.';
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite',
+            contents: { parts: [{ text: promptPdf }, { inlineData: { data: base64Pdf, mimeType: 'application/pdf' } }] },
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: { type: Type.OBJECT, properties: { accounts: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { bank: { type: Type.STRING }, name: { type: Type.STRING }, ownBalance: { type: Type.NUMBER }, debt: { type: Type.NUMBER }, minPayment: { type: Type.NUMBER }, currency: { type: Type.STRING } } } }, transactions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { type: { type: Type.STRING }, amount: { type: Type.NUMBER }, currency: { type: Type.STRING }, category: { type: Type.STRING }, note: { type: Type.STRING }, date: { type: Type.STRING } } } } } },
+            },
+          });
+          const parsed = JSON.parse(response.text || '{"accounts":[],"transactions":[]}');
+          if (parsed.transactions?.length > 0 || parsed.accounts?.length > 0) {
+            return res.json({ success: true, data: parsed, source: 'gemini-pdf' });
+          }
+        } catch (e) {}
+      }
     }
 
-    const ai = getGeminiClient();
-    if (!ai) {
-      if (groqResult) return res.json({ success: true, data: groqResult, source: 'groq' });
-      return res.status(500).json({ error: 'No AI available' });
+    if (text) {
+      const promptText2 = 'Проанализируй текст банковской выписки. Извлеки JSON: {"accounts":[],"transactions":[]} Текст:\n' + text.substring(0, 8000);
+      const groqResult2 = await groqChatJson(promptText2);
+      if (groqResult2) return res.json({ success: true, data: groqResult2, source: 'groq' });
     }
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
-      contents: promptText,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: { type: Type.OBJECT, properties: { accounts: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { bank: { type: Type.STRING }, name: { type: Type.STRING }, ownBalance: { type: Type.NUMBER }, debt: { type: Type.NUMBER }, minPayment: { type: Type.NUMBER }, currency: { type: Type.STRING } } } }, transactions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { type: { type: Type.STRING }, amount: { type: Type.NUMBER }, currency: { type: Type.STRING }, category: { type: Type.STRING }, note: { type: Type.STRING }, date: { type: Type.STRING } } } } } },
-      },
-    });
-    res.json({ success: true, data: JSON.parse(response.text || '{"accounts":[],"transactions":[]}'), source: 'gemini' });
+
+    res.json({ success: true, data: { accounts: [], transactions: [] }, source: 'empty' });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || 'PDF scan failed' });
   }

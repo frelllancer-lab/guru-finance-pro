@@ -435,19 +435,36 @@ export default function App() {
       // 1. Process PDF files
       for (const pdfFile of pdfFiles) {
         try {
-          const arrayBuffer = await pdfFile.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
           let fullText = '';
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
+          try {
+            const arrayBuffer = await pdfFile.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const content = await page.getTextContent();
+              fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
+            }
+          } catch (pdfErr) {
+            console.warn('pdfjs extraction failed, will try base64:', pdfErr);
+          }
+
+          let base64Pdf = '';
+          try {
+            const arrBuf = await pdfFile.arrayBuffer();
+            const bytes = new Uint8Array(arrBuf);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            base64Pdf = btoa(binary);
+          } catch (e) {
+            console.warn('base64 conversion failed:', e);
           }
 
           const res = await fetch('/api/ai/scan-pdf', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: fullText }),
+            body: JSON.stringify({ text: fullText, base64Pdf }),
           });
 
           const result = await res.json();
