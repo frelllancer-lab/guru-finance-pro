@@ -18,6 +18,7 @@ import {
   loginWithEmail,
   setupRecaptcha,
   sendPhoneCode,
+  sendResetPasswordEmail,
   logoutUser,
 } from '../lib/firebase';
 import { ConfirmationResult } from 'firebase/auth';
@@ -55,6 +56,9 @@ const AUTH_TEXTS: Record<Language, {
   confirmSmsBtn: string;
   resendSms: string;
   socialNote: string;
+  forgotPassword: string;
+  resetSent: string;
+  backToLogin: string;
 }> = {
   uk: {
     title: 'Хмарний Акаунт',
@@ -81,6 +85,9 @@ const AUTH_TEXTS: Record<Language, {
     confirmSmsBtn: 'Підтвердити та увійти',
     resendSms: 'Надіслати код повторно',
     socialNote: 'Якщо Google/Apple не працюють — скористайтеся вкладкою Email для швидкої реєстрації.',
+    forgotPassword: 'Забули пароль?',
+    resetSent: 'Лист із посиланням для відновлення пароля надіслано на пошту.',
+    backToLogin: 'Повернутися до входу',
   },
   en: {
     title: 'Cloud Account',
@@ -107,6 +114,9 @@ const AUTH_TEXTS: Record<Language, {
     confirmSmsBtn: 'Confirm & Sign In',
     resendSms: 'Resend code',
     socialNote: 'If Google/Apple don\'t work, use the Email tab for quick registration.',
+    forgotPassword: 'Forgot password?',
+    resetSent: 'A password reset link has been sent to your email.',
+    backToLogin: 'Back to login',
   },
   ru: {
     title: 'Облачный Аккаунт',
@@ -133,6 +143,9 @@ const AUTH_TEXTS: Record<Language, {
     confirmSmsBtn: 'Подтвердить и войти',
     resendSms: 'Отправить код заново',
     socialNote: 'Если Google/Apple не работают — используйте вкладку Email для быстрой регистрации.',
+    forgotPassword: 'Забыли пароль?',
+    resetSent: 'Письмо со ссылкой для восстановления пароля отправлено на почту.',
+    backToLogin: 'Вернуться к входу',
   },
 };
 
@@ -159,6 +172,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Status & Error state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
 
   if (!isOpen) return null;
 
@@ -294,6 +309,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             : 'Ошибка авторизации. Проверьте правильность введенных данных.'
         );
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const targetEmail = email.trim() || resetEmail.trim();
+    if (!targetEmail) {
+      setError(
+        currentLanguage === 'uk' ? 'Введіть email для відновлення пароля.'
+        : currentLanguage === 'en' ? 'Enter your email to reset password.'
+        : 'Введите email для восстановления пароля.'
+      );
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await sendResetPasswordEmail(targetEmail);
+      setResetSent(true);
+    } catch (err: any) {
+      console.error(err);
+      setError(
+        err.code === 'auth/user-not-found'
+          ? (currentLanguage === 'uk' ? 'Користувача з таким email не знайдено.'
+             : currentLanguage === 'en' ? 'No account found with this email.'
+             : 'Пользователь с таким email не найден.')
+          : (currentLanguage === 'uk' ? 'Не вдалося надіслати лист. Спробуйте ще раз.'
+             : currentLanguage === 'en' ? 'Failed to send reset email. Try again.'
+             : 'Не удалось отправить письмо. Попробуйте еще раз.')
+      );
     } finally {
       setLoading(false);
     }
@@ -451,6 +497,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 onClick={() => {
                   setAuthMethod('social');
                   setError(null);
+                  setResetSent(false);
                 }}
                 className={`py-2 rounded-xl transition ${
                   authMethod === 'social' ? 'surface shadow-xs text-blue-500 font-extrabold' : 'txt-sub'
@@ -518,6 +565,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             {/* METHOD 2: EMAIL & PASSWORD */}
             {authMethod === 'email' && (
+              resetSent ? (
+                <div className="space-y-4 pt-2 text-center">
+                  <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-emerald-600">{t.resetSent}</p>
+                    <p className="text-[11px] txt-sub mt-1">{resetEmail || email}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setResetSent(false); setError(null); }}
+                    className="w-full py-3 rounded-2xl text-xs font-bold surface-soft hover:bg-blue-500/10 text-blue-500 transition"
+                  >
+                    {t.backToLogin}
+                  </button>
+                </div>
+              ) : (
               <form onSubmit={handleEmailSubmit} className="space-y-3 pt-1">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider txt-sub mb-1">
@@ -562,6 +625,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   >
                     {isRegistering ? t.hasAccount : t.noAccount}
                   </button>
+                  {!isRegistering && (
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-blue-500 font-bold hover:underline"
+                    >
+                      {t.forgotPassword}
+                    </button>
+                  )}
                 </div>
 
                 <button
@@ -573,6 +645,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </form>
+              ))
             )}
 
             {/* METHOD 3: PHONE NUMBER (SMS) */}

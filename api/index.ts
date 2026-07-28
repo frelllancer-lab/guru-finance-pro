@@ -4,6 +4,8 @@ import { GoogleGenAI, Type } from '@google/genai';
 
 dotenv.config();
 
+dotenv.config();
+
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -411,20 +413,35 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
     // If we got base64 PDF, extract text server-side using pdf-parse v2
     if (base64Pdf && (!extractedText || extractedText.trim().length < 20)) {
       try {
-        const pdfMod = require('pdf-parse');
-        const PDFParse = pdfMod.PDFParse || pdfMod.default?.PDFParse || pdfMod;
+        const pdfMod = await import('pdf-parse');
+        const PDFParse = pdfMod.PDFParse || (pdfMod as any).default?.PDFParse || (pdfMod as any).default || pdfMod;
         const buf = Buffer.from(base64Pdf, 'base64');
-        const parser = new PDFParse({ data: new Uint8Array(buf) });
+        const parser = new (PDFParse as any)({ data: new Uint8Array(buf) });
         await parser.load();
         const result = await parser.getText();
         if (result && result.text) {
-          extractedText = result.text;
+          extractedText = typeof result.text === 'string' ? result.text : JSON.stringify(result.text);
         } else if (result && result.pages) {
           extractedText = result.pages.map((p: any) => p.text || '').join('\n');
         }
-        console.log('pdf-parse extracted', extractedText.length, 'chars');
+        console.log('pdf-parse v2 extracted', extractedText.length, 'chars');
       } catch (pdfErr) {
-        console.error('pdf-parse error:', pdfErr);
+        console.error('pdf-parse v2 error:', pdfErr);
+        // Try fallback: createRequire
+        try {
+          const { createRequire } = await import('module');
+          const req = createRequire(import.meta.url);
+          const pdfParseV1 = req('pdf-parse');
+          const parsePdf = pdfParseV1.default || pdfParseV1;
+          const buf = Buffer.from(base64Pdf, 'base64');
+          const pdfData = await parsePdf(buf);
+          if (pdfData && pdfData.text) {
+            extractedText = pdfData.text;
+            console.log('pdf-parse fallback extracted', extractedText.length, 'chars');
+          }
+        } catch (fallbackErr) {
+          console.error('pdf-parse fallback error:', fallbackErr);
+        }
       }
     }
 

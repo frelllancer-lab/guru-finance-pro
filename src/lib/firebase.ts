@@ -11,6 +11,7 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
   updateProfile,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -100,6 +101,11 @@ export const setupRecaptcha = (containerId: string) => {
 
 export const sendPhoneCode = async (phoneNumber: string, appVerifier: any): Promise<ConfirmationResult> => {
   return await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+};
+
+// Helper: Send Password Reset Email
+export const sendResetPasswordEmail = async (email: string) => {
+  await sendPasswordResetEmail(auth, email);
 };
 
 // Helper: Sign Out

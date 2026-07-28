@@ -45,8 +45,8 @@ import { CategoryLimits } from './components/CategoryLimits';
 import { IncomeDetailsModal } from './components/IncomeDetailsModal';
 import { ExpenseDetailsModal } from './components/ExpenseDetailsModal';
 
-// Initialize PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@6.1.200/build/pdf.worker.min.mjs`;
+// Initialize PDF.js worker - disabled for mobile compatibility (main thread)
+pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
 const INITIAL_ACCOUNTS: BankAccount[] = [];
 
@@ -441,33 +441,52 @@ export default function App() {
           const arrayBuffer = await pdfFile.arrayBuffer();
           const bytes = new Uint8Array(arrayBuffer);
 
-          // Try pdfjs text extraction
-          try {
-            const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-            for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
-              const content = await page.getTextContent();
-              fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
-            }
-          } catch (pdfErr) {
-            console.warn('pdfjs failed:', pdfErr);
-          }
-
-          // Convert to base64 (safe for mobile - uses TextDecoder)
-          if (bytes.length < 5_000_000) {
+          // Always convert to base64 for server-side processing
+          if (bytes.length < 10_000_000) {
             try {
               const decoder = new TextDecoder('latin1');
               base64Pdf = btoa(decoder.decode(bytes));
             } catch (e) {
-              console.warn('base64 failed:', e);
+              console.warn('base64 TextDecoder failed, trying manual:', e);
+              try {
+                let binary = '';
+                for (let i = 0; i < bytes.length; i++) {
+                  binary += String.fromCharCode(bytes[i]);
+                }
+                base64Pdf = btoa(binary);
+              } catch (e2) {
+                console.warn('base64 manual also failed:', e2);
+              }
             }
           }
 
+          // Try client-side pdfjs as bonus (may give text faster)
+          if (base64Pdf) {
+            try {
+              const pdf = await pdfjsLib.getDocument({
+                data: new Uint8Array(arrayBuffer),
+                isEvalSupported: false,
+                useSystemFonts: true,
+              }).promise;
+              for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
+              }
+            } catch (pdfErr) {
+              console.warn('pdfjs client-side failed (will use server):', pdfErr);
+            }
+          }
+
+          const controller = new AbortController();
+          const fetchTimeout = setTimeout(() => controller.abort(), 90000);
           const res = await fetch('/api/ai/scan-pdf', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(fullText.length > 100 ? { text: fullText } : { base64Pdf }),
+            body: JSON.stringify({ text: fullText, base64Pdf }),
+            signal: controller.signal,
           });
+          clearTimeout(fetchTimeout);
 
           const result = await res.json();
           if (result.success && result.data) {
@@ -748,33 +767,56 @@ export default function App() {
       let fullText = '';
       let base64Pdf = '';
 
-      // Try pdfjs text extraction
-      try {
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
-        }
-      } catch (pdfErr) {
-        console.warn('pdfjs failed:', pdfErr);
-      }
-
-      // Convert to base64 (safe for mobile - uses TextDecoder)
-      if (bytes.length < 5_000_000) {
+      // Always convert to base64 for server-side processing
+      if (bytes.length < 10_000_000) {
         try {
           const decoder = new TextDecoder('latin1');
           base64Pdf = btoa(decoder.decode(bytes));
         } catch (e) {
-          console.warn('base64 failed:', e);
+          console.warn('base64 TextDecoder failed, trying manual:', e);
+          try {
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            base64Pdf = btoa(binary);
+          } catch (e2) {
+            console.warn('base64 manual also failed:', e2);
+          }
         }
       }
 
+          // Try client-side pdfjs as bonus (with 10s timeout to not block mobile)
+          if (base64Pdf) {
+            try {
+              const pdfPromise = pdfjsLib.getDocument({
+                data: new Uint8Array(arrayBuffer),
+                isEvalSupported: false,
+                useSystemFonts: true,
+              }).promise;
+              const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('pdfjs timeout')), 10000)
+              );
+              const pdf = await Promise.race([pdfPromise, timeoutPromise]);
+              for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
+              }
+            } catch (pdfErr) {
+              console.warn('pdfjs client-side skipped (will use server):', pdfErr);
+            }
+          }
+
+      const controller2 = new AbortController();
+      const fetchTimeout2 = setTimeout(() => controller2.abort(), 90000);
       const res = await fetch('/api/ai/scan-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fullText.length > 100 ? { text: fullText } : { base64Pdf }),
+        body: JSON.stringify({ text: fullText, base64Pdf }),
+        signal: controller2.signal,
       });
+      clearTimeout(fetchTimeout2);
 
       const result = await res.json();
       let extracted = false;
