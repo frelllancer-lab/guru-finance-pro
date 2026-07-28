@@ -54,6 +54,7 @@ const AUTH_TEXTS: Record<Language, {
   smsCodeLabel: string;
   confirmSmsBtn: string;
   resendSms: string;
+  socialNote: string;
 }> = {
   uk: {
     title: 'Хмарний Акаунт',
@@ -62,7 +63,7 @@ const AUTH_TEXTS: Record<Language, {
     loggedSubtitle: 'Хмарний профіль активний',
     cloudSync: 'Дані автоматично зберігаються в хмарі',
     logout: 'Вийти з акаунта',
-    tabFast: 'Швидкий',
+    tabFast: 'Соцмережі',
     tabEmail: 'Email',
     tabPhone: 'Телефон',
     loginGoogle: 'Увійти через Google',
@@ -79,6 +80,7 @@ const AUTH_TEXTS: Record<Language, {
     smsCodeLabel: 'Код із SMS повідомлення',
     confirmSmsBtn: 'Підтвердити та увійти',
     resendSms: 'Надіслати код повторно',
+    socialNote: 'Якщо Google/Apple не працюють — скористайтеся вкладкою Email для швидкої реєстрації.',
   },
   en: {
     title: 'Cloud Account',
@@ -87,7 +89,7 @@ const AUTH_TEXTS: Record<Language, {
     loggedSubtitle: 'Cloud profile is active',
     cloudSync: 'Data is automatically backed up in the cloud',
     logout: 'Log Out',
-    tabFast: 'Quick',
+    tabFast: 'Social',
     tabEmail: 'Email',
     tabPhone: 'Phone',
     loginGoogle: 'Sign in with Google',
@@ -104,6 +106,7 @@ const AUTH_TEXTS: Record<Language, {
     smsCodeLabel: 'SMS Code',
     confirmSmsBtn: 'Confirm & Sign In',
     resendSms: 'Resend code',
+    socialNote: 'If Google/Apple don\'t work, use the Email tab for quick registration.',
   },
   ru: {
     title: 'Облачный Аккаунт',
@@ -112,7 +115,7 @@ const AUTH_TEXTS: Record<Language, {
     loggedSubtitle: 'Облачный профиль активен',
     cloudSync: 'Данные автоматически сохраняются в облаке',
     logout: 'Выйти из аккаунта',
-    tabFast: 'Быстрый',
+    tabFast: 'Соцсети',
     tabEmail: 'Email',
     tabPhone: 'Телефон',
     loginGoogle: 'Войти через Google',
@@ -129,6 +132,7 @@ const AUTH_TEXTS: Record<Language, {
     smsCodeLabel: 'Код из SMS сообщения',
     confirmSmsBtn: 'Подтвердить и войти',
     resendSms: 'Отправить код заново',
+    socialNote: 'Если Google/Apple не работают — используйте вкладку Email для быстрой регистрации.',
   },
 };
 
@@ -481,6 +485,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {/* METHOD 1: SOCIAL (GOOGLE / APPLE) */}
             {authMethod === 'social' && (
               <div className="space-y-3 pt-1">
+                <div className="p-3 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-500 text-[11px] font-bold text-center leading-relaxed">
+                  {t.socialNote}
+                </div>
                 <button
                   onClick={handleGoogleLogin}
                   disabled={loading}
