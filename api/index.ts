@@ -1,8 +1,11 @@
 ﻿import express from 'express';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
+import { createRequire } from 'module';
 
 dotenv.config();
+
+const require = createRequire(import.meta.url);
 
 dotenv.config();
 
@@ -409,28 +412,19 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
   try {
     const { text, base64Pdf } = req.body;
     let extractedText = text || '';
-    const debug: any = { textLen: extractedText.length, hasBase64: !!base64Pdf, base64Len: base64Pdf?.length || 0 };
 
-    // If we got base64 PDF, extract text server-side using pdfjs-dist legacy
+    // If we got base64 PDF, extract text server-side using pdf-parse v1 (CJS, works on Vercel)
     if (base64Pdf && (!extractedText || extractedText.trim().length < 20)) {
       try {
-        const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-        debug.pdfjsImported = true;
+        const pdfParse = require('pdf-parse');
         const buf = Buffer.from(base64Pdf, 'base64');
-        debug.bufSize = buf.length;
-        const data = new Uint8Array(buf);
-        const pdf = await (pdfjsLib as any).getDocument({ data, useSystemFonts: true, isEvalSupported: false }).promise;
-        debug.numPages = pdf.numPages;
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          extractedText += content.items.map((it: any) => it.str).join(' ') + '\n';
+        const pdfData = await pdfParse(buf);
+        if (pdfData && pdfData.text) {
+          extractedText = pdfData.text;
+          console.log('pdf-parse extracted', extractedText.length, 'chars,', pdfData.numpages, 'pages');
         }
-        debug.extractedChars = extractedText.length;
-        console.log('pdfjs-dist legacy extracted', extractedText.length, 'chars');
       } catch (pdfErr: any) {
-        console.error('pdfjs-dist extraction error:', pdfErr);
-        debug.pdfError = pdfErr.message;
+        console.error('pdf-parse extraction error:', pdfErr.message || pdfErr);
       }
     }
 
@@ -478,7 +472,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
       }
     }
 
-    res.json({ success: true, data: { accounts: [], transactions: [] }, source: 'empty', extractedTextLength: extractedText.length, debug });
+    res.json({ success: true, data: { accounts: [], transactions: [] }, source: 'empty', extractedTextLength: extractedText.length });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || 'PDF scan failed' });
   }
