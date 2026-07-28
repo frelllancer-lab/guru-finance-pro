@@ -1,7 +1,6 @@
 ﻿import express from 'express';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
-import { parseBankStatement } from './parsers';
 
 dotenv.config();
 
@@ -9,6 +8,7 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// --- Gemini client ---
 function getGeminiClient() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
@@ -18,6 +18,7 @@ function getGeminiClient() {
   });
 }
 
+// --- Groq (primary AI) ---
 async function groqChat(prompt: string): Promise<string | null> {
   const key = process.env.GROQ_API_KEY;
   if (!key) return null;
@@ -52,31 +53,137 @@ async function groqChatJson(prompt: string): Promise<any | null> {
   }
 }
 
-async function geminiGenerate(prompt: string): Promise<string | null> {
-  const ai = getGeminiClient();
-  if (!ai) return null;
-  try {
-    const response = await ai.models.generateContent({ model: 'gemini-3.1-flash-lite', contents: prompt });
-    return response.text || null;
-  } catch {
-    return null;
+// --- Regex PDF parsers ---
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  food: ['атб', 'сільпо', 'фора', 'екомаркет', 'маркет', 'супермаркет', 'магазин', 'продукт', 'їжа', 'молоко', 'хліб', 'овоч', 'фрукт', 'кафе', 'ресторан', 'фастфуд', 'макдональдс', 'kfc', 'starbucks', 'coffee', 'pizza', 'puzata', 'хата', 'суші', 'піцерія'],
+  transport: ['укрзалізниця', 'метро', 'автобус', 'таксі', 'bolt', 'uber', 'бензин', 'азс', 'окко', 'wog', 'parallel', 'парковка', 'parking'],
+  shopping: ['allo', 'фокстрот', 'comfy', 'rome', 'citrus', 'rozetka', 'wildberries', 'ozon', 'amazon', 'aliexpress', 'закуп'],
+  home: ['квартплата', 'жек', 'комунальні', 'водоканал', 'енергія', 'газ', 'інтернет', 'kyivstar', 'vodafone', 'lifecell'],
+  fun: ['кіно', 'театр', 'концерт', 'стадіон', 'спорт', 'фітнес', 'gym', 'басейн', 'квест', 'netflix', 'spotify', 'шопінг'],
+  health: ['аптека', 'лікарня', 'клініка', 'лікар', 'стоматолог', 'health', 'pharmacy', 'мед', 'аналіз', 'здоров'],
+  services: ['пошта', 'нова пошта', 'meest', 'ukrposhta', 'сервіс', 'ремонт', 'перукар', 'salon', 'хімчистка', 'clean'],
+};
+
+function guessCategory(note: string): string {
+  const lower = note.toLowerCase();
+  for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    for (const kw of keywords) {
+      if (lower.includes(kw.toLowerCase())) return cat;
+    }
   }
+  return 'other';
 }
 
-async function aiGenerateJson(prompt: string): Promise<any | null> {
-  const groqResult = await groqChatJson(prompt);
-  if (groqResult) return groqResult;
-  const geminiText = await geminiGenerate(prompt);
-  if (geminiText) {
-    try {
-      const m = geminiText.match(/\{[\s\S]*\}/);
-      if (m) return JSON.parse(m[0]);
-    } catch {}
+function parseUAHAmount(s: string): number {
+  let cleaned = s.replace(/[^\d,.\-]/g, '');
+  const isNeg = cleaned.includes('-');
+  cleaned = cleaned.replace(/-/g, '');
+  if (cleaned.includes(',')) {
+    cleaned = cleaned.replace(/\.(?=\d{3})/g, '').replace(',', '.');
   }
-  return null;
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : (isNeg ? -num : num);
 }
 
-app.get('/api/health', (req, res) => {
+function parseDate(s: string): string {
+  const m = s.match(/(\d{1,2})[.\-/](\d{1,2})[.\-/]?(\d{2,4})?/);
+  if (!m) return new Date().toISOString().slice(0, 10);
+  let year = m[3] || '2026';
+  if (year.length === 2) year = '20' + year;
+  return year + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+}
+
+function parseBankStatement(text: string) {
+  if (!text || text.trim().length < 20) return { accounts: [], transactions: [], bank: null };
+
+  const isMono = /mono|monobank|мнобанк|black\s*\(\*|white\s*\(\*|е?підтримк/i.test(text);
+  const isPrivat = /приват|privat|приватбанк|privatbank|4149|5168/i.test(text);
+  const isABank = /а-?банк|a-?bank|абанк/i.test(text);
+  const bank = isMono ? 'Monobank' : isPrivat ? 'PrivatBank' : isABank ? 'А-Банк' : null;
+
+  const accounts: any[] = [];
+  if (bank) {
+    const balMatch = text.match(/(?:баланс|залишок|останній)[\s:]*(?:UAH|UAH|UAH|грн|\u20B4)?\s*([\d\s,.\-]+)/i) ||
+                     text.match(/(?:баланс|залишок)[\s:]*(?:грн)?\s*([\d\s,.\-]+)/i);
+    const bal = balMatch ? parseUAHAmount(balMatch[1]) : 0;
+    accounts.push({
+      bank: bank,
+      name: bank,
+      ownBalance: bal >= 0 ? bal : 0,
+      debt: bal < 0 ? Math.abs(bal) : 0,
+      minPayment: bal < 0 ? Math.round(Math.abs(bal) * 0.05 * 100) / 100 : 0,
+      currency: 'UAH',
+    });
+  }
+
+  const transactions: any[] = [];
+  const txPattern = /(\d{1,2}[.\-/]\d{1,2}[.\-/]?\d{0,4})\s+([^\n]{2,60}?)\s+([+-])\s*([\d\s,.\-]+?)\s*(?:UAH|UAH|UAH|грн|\u20B4|$)/gim;
+  let match;
+  while ((match = txPattern.exec(text)) !== null) {
+    const date = parseDate(match[1]);
+    const note = match[2].trim();
+    const sign = match[3];
+    const amount = Math.abs(parseUAHAmount(match[4]));
+    if (amount <= 0 || amount > 10000000) continue;
+    const isIncome = sign === '+' || /зарплат|надходж|переказ|кешбек|повернення|поповнення/i.test(note);
+    transactions.push({
+      type: isIncome ? 'income' : 'expense',
+      amount,
+      currency: 'UAH',
+      category: isIncome ? 'salary' : guessCategory(note),
+      note,
+      date,
+    });
+  }
+
+  if (transactions.length === 0) {
+    const simplePattern = /(\d{1,2})[.\-/](\d{1,2})[.\-/]?(\d{0,4})\s+([^\n]{3,60}?)\s+([\d\s,.\-]+?)\s*(?:UAH|UAH|грн|\u20B4)/gim;
+    while ((match = simplePattern.exec(text)) !== null) {
+      const year = match[3] ? (match[3].length === 2 ? '20' + match[3] : match[3]) : '2026';
+      const date = year + '-' + match[2].padStart(2, '0') + '-' + match[1].padStart(2, '0');
+      const note = match[4].trim();
+      const amount = Math.abs(parseUAHAmount(match[5]));
+      if (amount <= 0) continue;
+      const isIncome = /зарплат|надходж|переказ|кешбек|повернення|поповнення|\+/i.test(note);
+      transactions.push({
+        type: isIncome ? 'income' : 'expense',
+        amount,
+        currency: 'UAH',
+        category: isIncome ? 'salary' : guessCategory(note),
+        note,
+        date,
+      });
+    }
+  }
+
+  if (transactions.length === 0) {
+    const genericPattern = /(\d{1,2}[.\-/]\d{1,2}[.\-/]?\d{0,4})\s+([^\n]{2,80}?)\s+([\d\s,.\-]+?)\s*(?:грн|UAH|\u20B4)/gim;
+    while ((match = genericPattern.exec(text)) !== null) {
+      const date = parseDate(match[1]);
+      const note = match[2].trim();
+      const amount = Math.abs(parseUAHAmount(match[3]));
+      if (amount <= 0 || amount > 10000000) continue;
+      const isIncome = /надходж|зарплат|переказ|кешбек|повернення|поповнення|\+/i.test(note);
+      transactions.push({
+        type: isIncome ? 'income' : 'expense',
+        amount,
+        currency: 'UAH',
+        category: isIncome ? 'salary' : guessCategory(note),
+        note,
+        date,
+      });
+    }
+  }
+
+  if (accounts.length === 0 && transactions.length > 0) {
+    accounts.push({ bank: 'Банк', name: 'Выписка', ownBalance: 0, debt: 0, minPayment: 0, currency: 'UAH' });
+  }
+
+  return { accounts, transactions, bank };
+}
+
+// --- API Routes ---
+app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
     hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
@@ -84,7 +191,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.get('/api/exchange-rates', async (req, res) => {
+app.get('/api/exchange-rates', async (_req, res) => {
   try {
     const response = await fetch('https://open.er-api.com/v6/latest/USD');
     if (response.ok) {
@@ -93,7 +200,7 @@ app.get('/api/exchange-rates', async (req, res) => {
     } else {
       res.json({ success: false, rateUAH: 41.5 });
     }
-  } catch (err) {
+  } catch {
     res.json({ success: false, rateUAH: 41.5 });
   }
 });
@@ -103,12 +210,12 @@ app.post('/api/ai/advice', async (req, res) => {
     const { period, currency, income, expense, debt, accountsCount, language = 'uk' } = req.body;
     const lang = language === 'en' ? 'en' : language === 'ru' ? 'ru' : 'uk';
     const defaultAdvice: Record<string, string> = {
-      uk: '1. Формуйте подушку безпеки на 3-6 місяців.\n2. У першу чергу гасіть борги з найвищою процентною ставкою.\n3. Стежте за співвідношенням обов\'язкових платежів до загальних доходів (не більше 30%).',
-      en: '1. Build an emergency cushion for 3-6 months.\n2. Pay off highest-interest card debt first.\n3. Keep essential obligations under 30% of total income.',
-      ru: '1. Формируйте подушку безопасности на 3-6 месяцев.\n2. В первую очередь гасите долги с наивысшей процентной ставкой.\n3. Следите за соотношением обязательных платежей к общим доходам (не более 30%).',
+      uk: '1. Формуйте подушку безпеки на 3-6 місяців.\n2. Гасіть борги з найвищою ставкою.\n3. Контролюйте витрати (не більше 30% доходів).',
+      en: '1. Build an emergency cushion for 3-6 months.\n2. Pay off highest-interest debt first.\n3. Keep obligations under 30% of income.',
+      ru: '1. Формируйте подушку безопасности на 3-6 месяцев.\n2. Гасите долги с наивысшей ставкой.\n3. Контролируйте расходы (не более 30% доходов).',
     };
-    const langName = lang === 'uk' ? 'українською мовою' : lang === 'en' ? 'English' : 'русском языке';
-    const promptText = 'Ты - финансовый консультант в приложении "Финансы PRO". Период: ' + (period || 'месяц') + ', Валюта: ' + (currency || 'UAH') + ', Доходы: ' + (income || 0) + ', Расходы: ' + (expense || 0) + ', Долг: ' + (debt || 0) + ', Счетов: ' + (accountsCount || 0) + '. Дай 3 коротких практических финансовых совета НА ' + langName.toUpperCase() + '. Оформи как 3 нумерованных пункта.';
+    const langName = lang === 'uk' ? 'українською' : lang === 'en' ? 'English' : 'русском';
+    const promptText = 'Ты финансовый консультант. Период: ' + (period || 'месяц') + ', Валюта: ' + (currency || 'UAH') + ', Доходы: ' + (income || 0) + ', Расходы: ' + (expense || 0) + ', Долг: ' + (debt || 0) + ', Счетов: ' + (accountsCount || 0) + '. Дай 3 совета на ' + langName + '. 3 нумерованных пункта.';
     const groqAdvice = await groqChat(promptText);
     if (groqAdvice) {
       res.json({ success: true, advice: groqAdvice.trim() });
@@ -142,9 +249,9 @@ app.post('/api/ai/chat', async (req, res) => {
     if (reply) {
       res.json({ success: true, reply: reply.trim() });
     } else {
-      const gemini = getGeminiClient();
-      if (gemini) {
-        const response = await gemini.models.generateContent({ model: 'gemini-3.1-flash-lite', contents: prompt });
+      const ai = getGeminiClient();
+      if (ai) {
+        const response = await ai.models.generateContent({ model: 'gemini-3.1-flash-lite', contents: prompt });
         res.json({ success: true, reply: (response.text || def[lang]).trim() });
       } else {
         res.json({ success: true, reply: def[lang] });
@@ -159,33 +266,9 @@ app.post('/api/ai/scan-receipt', async (req, res) => {
   try {
     const { base64Image, mimeType } = req.body;
     if (!base64Image) return res.status(400).json({ error: 'base64Image required' });
-
-    const promptText = 'Проанализируй кассовый чек или квитанцию. Извлеки JSON: {"type":"expense или income","amount":число,"currency":"UAH или USD","category":"одно из food transport shopping home fun health services cash other","note":"название","date":"ISO"}. Только JSON без текста.';
-
-    const groqKey = process.env.GROQ_API_KEY;
-    if (groqKey) {
-      try {
-        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + groqKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'user', content: promptText + '\n\nПрикреплено изображение (base64). Текст из изображения: [изображение чека, проанализируй по описанию]' }],
-            temperature: 0.2,
-            max_tokens: 500,
-          }),
-        });
-        if (resp.ok) {
-          const data = await resp.json() as any;
-          const content = data.choices?.[0]?.message?.content || '';
-          const parsed = JSON.parse(content.match(/\{[\s\S]*\}/)?.[0] || '{}');
-          if (parsed.type) return res.json({ success: true, data: parsed });
-        }
-      } catch {}
-    }
-
     const ai = getGeminiClient();
     if (!ai) return res.status(500).json({ error: 'No AI available' });
+    const promptText = 'Проанализируй кассовый чек. Извлеки JSON: {"type":"expense или income","amount":число,"currency":"UAH","category":"из food transport shopping home fun health services cash other","note":"название","date":"ISO"}. Только JSON.';
     const response = await ai.models.generateContent({
       model: 'gemini-3.1-flash-lite',
       contents: { parts: [{ text: promptText }, { inlineData: { data: base64Image, mimeType: mimeType || 'image/jpeg' } }] },
@@ -204,31 +287,11 @@ app.post('/api/ai/scan-multibank', async (req, res) => {
   try {
     const { images } = req.body;
     if (!Array.isArray(images) || images.length === 0) return res.status(400).json({ error: 'images required' });
-
-    const promptText = 'Проанализируй скриншоты банков. Найди JSON: {"accounts":[{"bank":"","name":"","ownBalance":0,"debt":0,"minPayment":0,"currency":"UAH"}],"transactions":[{"type":"expense или income","amount":0,"currency":"UAH","category":"из food transport shopping home fun health services cash salary freelance gift invest other","note":"","date":"ISO"}]}';
-
-    const groqKey = process.env.GROQ_API_KEY;
-    if (groqKey) {
-      try {
-        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + groqKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'user', content: promptText }],
-            temperature: 0.2,
-            max_tokens: 2000,
-          }),
-        });
-        if (resp.ok) {
-          const data = await resp.json() as any;
-          const content = data.choices?.[0]?.message?.content || '';
-          const parsed = JSON.parse(content.match(/\{[\s\S]*\}/)?.[0] || '{"accounts":[],"transactions":[]}');
-          return res.json({ success: true, data: parsed });
-        }
-      } catch {}
+    const promptText = 'Проанализируй скриншоты банков. Найди accounts и transactions в JSON.';
+    const groqResult = await groqChatJson(promptText);
+    if (groqResult && groqResult.transactions) {
+      return res.json({ success: true, data: groqResult, source: 'groq' });
     }
-
     const ai = getGeminiClient();
     if (!ai) return res.status(500).json({ error: 'No AI available' });
     const imageParts = images.map((img: any) => ({ inlineData: { data: img.data, mimeType: img.mimeType || 'image/jpeg' } }));
@@ -261,8 +324,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
       });
     }
 
-    const promptText = 'Проанализируй текст банковской выписки. Извлеки JSON: {"accounts":[{"bank":"","name":"","ownBalance":0,"debt":0,"minPayment":0,"currency":"UAH"}],"transactions":[{"type":"expense или income","amount":0,"currency":"UAH","category":"из food transport shopping home fun health services cash salary freelance gift invest other","note":"","date":"ISO"}]} Текст выписки:\n' + text.substring(0, 8000);
-
+    const promptText = 'Проанализируй текст банковской выписки. Извлеки JSON: {"accounts":[{"bank":"","name":"","ownBalance":0,"debt":0,"minPayment":0,"currency":"UAH"}],"transactions":[{"type":"expense или income","amount":0,"currency":"UAH","category":"из food transport shopping home fun health services cash salary freelance gift invest other","note":"","date":"ISO"}]} Текст:\n' + text.substring(0, 8000);
     const groqResult = await groqChatJson(promptText);
     if (groqResult && (groqResult.transactions?.length > 0 || groqResult.accounts?.length > 0)) {
       return res.json({ success: true, data: groqResult, source: 'groq' });
@@ -335,7 +397,7 @@ app.post('/api/sync/apple-wallet-shortcut', (req, res) => {
   try {
     const { amount, merchant, type, category, currency } = req.body;
     res.json({ success: true, transaction: { type: type || 'expense', amount: parseFloat(amount) || 0, currency: currency || 'UAH', category: category || 'shopping', note: merchant || 'Apple Pay', date: new Date().toISOString() }, message: 'Accepted' });
-  } catch (err: any) {
+  } catch {
     res.status(400).json({ error: 'Invalid data' });
   }
 });
