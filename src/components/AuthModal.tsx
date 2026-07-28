@@ -645,7 +645,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </form>
-              ))
+              )
             )}
 
             {/* METHOD 3: PHONE NUMBER (SMS) */}
