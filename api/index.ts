@@ -317,9 +317,10 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
     // If we got base64 PDF, extract text server-side using pdf-parse
     if (base64Pdf && (!extractedText || extractedText.trim().length < 20)) {
       try {
-        const pdfParse = (await import('pdf-parse')).default;
+        const pdfParse = await import('pdf-parse');
+        const parsePdf = (pdfParse as any).default || pdfParse;
         const buf = Buffer.from(base64Pdf, 'base64');
-        const pdfData = await pdfParse(buf);
+        const pdfData = await parsePdf(buf);
         if (pdfData && pdfData.text) {
           extractedText = pdfData.text;
         }
