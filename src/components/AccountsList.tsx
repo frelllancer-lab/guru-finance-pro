@@ -167,12 +167,14 @@ export const AccountsList: React.FC<AccountsListProps> = ({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              onDeleteAccount(acc.id);
+                              if (confirm(currentLanguage === 'ru' ? 'Удалить этот счет?' : currentLanguage === 'en' ? 'Delete this account?' : 'Видалити цей рахунок?')) {
+                                onDeleteAccount(acc.id);
+                              }
                             }}
-                            className="txt-sub hover:text-red-500 p-1 transition"
-                            title="Delete card"
+                            className="txt-sub hover:text-red-500 p-1.5 rounded-md hover:bg-red-50 transition"
+                            title="Delete"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </div>

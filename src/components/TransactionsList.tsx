@@ -197,11 +197,16 @@ export const TransactionsList: React.FC<TransactionsListProps> = ({
                     {formatCurrency(convertedAmount, currency, 2)}
                   </span>
                   <button
-                    onClick={() => onDeleteTransaction(tItem.id)}
-                    className="txt-sub hover:text-red-500 p-1 transition"
-                    title="Delete record"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(currentLanguage === 'ru' ? 'Удалить эту операцию?' : currentLanguage === 'en' ? 'Delete this transaction?' : 'Видалити цю операцію?')) {
+                        onDeleteTransaction(tItem.id);
+                      }
+                    }}
+                    className="txt-sub hover:text-red-500 p-1.5 rounded-md hover:bg-red-50 transition"
+                    title="Delete"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>

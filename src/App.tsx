@@ -436,29 +436,36 @@ export default function App() {
       for (const pdfFile of pdfFiles) {
         try {
           let fullText = '';
+          let base64Pdf = '';
+
+          const arrayBuffer = await pdfFile.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuffer);
+
+          // Try pdfjs text extraction
           try {
-            const arrayBuffer = await pdfFile.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
             for (let i = 1; i <= pdf.numPages; i++) {
               const page = await pdf.getPage(i);
               const content = await page.getTextContent();
               fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
             }
           } catch (pdfErr) {
-            console.warn('pdfjs extraction failed, will try base64:', pdfErr);
+            console.warn('pdfjs failed:', pdfErr);
           }
 
-          let base64Pdf = '';
-          try {
-            const arrBuf = await pdfFile.arrayBuffer();
-            const bytes = new Uint8Array(arrBuf);
-            let binary = '';
-            for (let i = 0; i < bytes.length; i++) {
-              binary += String.fromCharCode(bytes[i]);
+          // Convert to base64 (only if small enough for API)
+          if (bytes.length < 3_500_000) {
+            try {
+              let binary = '';
+              const chunkSize = 8192;
+              for (let i = 0; i < bytes.length; i += chunkSize) {
+                const chunk = bytes.subarray(i, i + chunkSize);
+                binary += String.fromCharCode.apply(null, chunk as any);
+              }
+              base64Pdf = btoa(binary);
+            } catch (e) {
+              console.warn('base64 failed:', e);
             }
-            base64Pdf = btoa(binary);
-          } catch (e) {
-            console.warn('base64 conversion failed:', e);
           }
 
           const res = await fetch('/api/ai/scan-pdf', {
