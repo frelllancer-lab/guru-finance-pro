@@ -3,9 +3,6 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "framework": null,
-  "env": {
-    "GEMINI_API_KEY": "@gemini-api-key"
-  },
   "functions": {
     "server.ts": {
       "includeFiles": "dist/**"
