@@ -1,0 +1,6 @@
+{
+  "name": "Финансы PRO",
+  "description": "Управление личными финансами, счетами и картами с ИИ-анализом чеков, выписок и финансовых советов",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

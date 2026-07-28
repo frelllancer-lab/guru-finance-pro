@@ -1,0 +1,47 @@
+{
+  "entities": {
+    "User": {
+      "path": "users/{userId}",
+      "fields": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "Account": {
+      "path": "users/{userId}/accounts/{accountId}",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "balance": { "type": "number" },
+        "currency": { "type": "string" },
+        "lastFourDigits": { "type": "string" },
+        "cardColor": { "type": "string" }
+      }
+    },
+    "Transaction": {
+      "path": "users/{userId}/transactions/{txId}",
+      "fields": {
+        "id": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "type": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "accountId": { "type": "string" },
+        "date": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "CategoryLimit": {
+      "path": "users/{userId}/categoryLimits/{limitId}",
+      "fields": {
+        "categoryId": { "type": "string" },
+        "limit": { "type": "number" }
+      }
+    }
+  }
+}
