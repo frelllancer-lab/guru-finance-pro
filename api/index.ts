@@ -410,38 +410,21 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
     const { text, base64Pdf } = req.body;
     let extractedText = text || '';
 
-    // If we got base64 PDF, extract text server-side using pdf-parse v2
+    // If we got base64 PDF, extract text server-side using pdfjs-dist
     if (base64Pdf && (!extractedText || extractedText.trim().length < 20)) {
       try {
-        const pdfMod = await import('pdf-parse');
-        const PDFParse = pdfMod.PDFParse || (pdfMod as any).default?.PDFParse || (pdfMod as any).default || pdfMod;
+        const pdfjsLib = await import('pdfjs-dist');
         const buf = Buffer.from(base64Pdf, 'base64');
-        const parser = new (PDFParse as any)({ data: new Uint8Array(buf) });
-        await parser.load();
-        const result = await parser.getText();
-        if (result && result.text) {
-          extractedText = typeof result.text === 'string' ? result.text : JSON.stringify(result.text);
-        } else if (result && result.pages) {
-          extractedText = result.pages.map((p: any) => p.text || '').join('\n');
+        const data = new Uint8Array(buf);
+        const pdf = await (pdfjsLib as any).getDocument({ data, useSystemFonts: true, isEvalSupported: false }).promise;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          extractedText += content.items.map((it: any) => it.str).join(' ') + '\n';
         }
-        console.log('pdf-parse v2 extracted', extractedText.length, 'chars');
+        console.log('pdfjs-dist extracted', extractedText.length, 'chars');
       } catch (pdfErr) {
-        console.error('pdf-parse v2 error:', pdfErr);
-        // Try fallback: createRequire
-        try {
-          const { createRequire } = await import('module');
-          const req = createRequire(import.meta.url);
-          const pdfParseV1 = req('pdf-parse');
-          const parsePdf = pdfParseV1.default || pdfParseV1;
-          const buf = Buffer.from(base64Pdf, 'base64');
-          const pdfData = await parsePdf(buf);
-          if (pdfData && pdfData.text) {
-            extractedText = pdfData.text;
-            console.log('pdf-parse fallback extracted', extractedText.length, 'chars');
-          }
-        } catch (fallbackErr) {
-          console.error('pdf-parse fallback error:', fallbackErr);
-        }
+        console.error('pdfjs-dist extraction error:', pdfErr);
       }
     }
 
