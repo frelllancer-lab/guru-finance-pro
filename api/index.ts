@@ -93,12 +93,106 @@ function parseDate(s: string): string {
   return year + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
 }
 
+function parseNovaPay(text: string): { accounts: any[], transactions: any[] } {
+  const accounts: any[] = [];
+  const transactions: any[] = [];
+
+  const balMatch = text.match(/Залишок на кінець періоду:\s*([\d\s,.\-]+?)\s*UAH/i);
+  const bal = balMatch ? parseUAHAmount(balMatch[1]) : 0;
+  const cardMatch = text.match(/Картка:\s*(\S+)/);
+  const nameMatch = text.match(/ПІБ:\s*(.+)/);
+  accounts.push({
+    bank: 'НоваПей',
+    name: (nameMatch?.[1] || 'НоваПей') + ' ' + (cardMatch?.[1] || ''),
+    ownBalance: bal >= 0 ? bal : 0,
+    debt: bal < 0 ? Math.abs(bal) : 0,
+    minPayment: bal < 0 ? Math.round(Math.abs(bal) * 0.05 * 100) / 100 : 0,
+    currency: 'UAH',
+  });
+
+  const opsIdx = text.indexOf('Операції');
+  const searchStart = opsIdx > 0 ? opsIdx : 0;
+  const txText = text.substring(searchStart);
+
+  const blocks = txText.split(/(?<!\d)(?=\d{1,2}\.\d{2}\.\d{4}\s*\n)/);
+  for (const block of blocks) {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) continue;
+
+    const dateMatch = lines[0].match(/^(\d{1,2})\.(\d{2})\.(\d{4})$/);
+    if (!dateMatch) continue;
+    const date = `${dateMatch[3]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[1].padStart(2, '0')}`;
+
+    let amountLine = '';
+    let noteParts: string[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (/\d[\d\s,]*[.,]\d{2}\s*UAH/i.test(l)) {
+        amountLine = l;
+        break;
+      }
+      if (i === 1) {
+        const timeCard = l.replace(/^\d{2}:\d{2}\s+/, '').replace(/\*?\d{4}\s*/, '').trim();
+        if (timeCard) noteParts.push(timeCard);
+      } else {
+        if (!/^\d{10,}/.test(l) && !/^5175/.test(l) && !/^UA\d{27}/i.test(l)) {
+          noteParts.push(l);
+        }
+      }
+    }
+
+    const amtMatch = amountLine.match(/([-+]?)\s*([\d\s]+[.,]\d{2})\s*UAH/);
+    if (!amtMatch) continue;
+    const sign = amtMatch[1] === '-' ? -1 : 1;
+    const amount = Math.abs(parseUAHAmount(amtMatch[2]));
+    if (amount <= 0 || amount > 10000000) continue;
+
+    const note = noteParts.join(' ').replace(/\s+/g, ' ').trim() || 'Операція';
+    const isTransfer = /переказ коштів/i.test(note);
+    const isIncome = sign > 0 || /надходж|кешбек|повернення|поповнення/i.test(note);
+    const isPayer = /Платник:/i.test(note);
+    const isRecipient = /Отримувач:/i.test(note);
+
+    let category: string;
+    if (isTransfer || isPayer || isRecipient) {
+      category = 'transfer';
+    } else {
+      category = isIncome ? 'salary' : guessCategory(note);
+    }
+
+    let finalType: 'income' | 'expense';
+    if (isPayer) finalType = 'income';
+    else if (isRecipient) finalType = 'expense';
+    else finalType = isIncome ? 'income' : 'expense';
+
+    transactions.push({
+      type: finalType,
+      amount,
+      currency: 'UAH',
+      category,
+      note,
+      date,
+    });
+  }
+
+  return { accounts, transactions };
+}
+
 function parseBankStatement(text: string) {
   if (!text || text.trim().length < 20) return { accounts: [], transactions: [], bank: null };
 
+  const isNovaPay = /новапей|novapay|ТзОВ «НоваПей»|38324133/i.test(text);
   const isMono = /mono|monobank|мнобанк|black\s*\(\*|white\s*\(\*|е?підтримк/i.test(text);
   const isPrivat = /приват|privat|приватбанк|privatbank|4149|5168/i.test(text);
   const isABank = /а-?банк|a-?bank|абанк/i.test(text);
+
+  if (isNovaPay) {
+    const result = parseNovaPay(text);
+    if (result.transactions.length > 0) {
+      return { ...result, bank: 'НоваПей' };
+    }
+  }
+
   const bank = isMono ? 'Monobank' : isPrivat ? 'PrivatBank' : isABank ? 'А-Банк' : null;
 
   const accounts: any[] = [];
@@ -314,15 +408,18 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
     const { text, base64Pdf } = req.body;
     let extractedText = text || '';
 
-    // If we got base64 PDF, extract text server-side using pdf-parse
+    // If we got base64 PDF, extract text server-side using pdf-parse v2
     if (base64Pdf && (!extractedText || extractedText.trim().length < 20)) {
       try {
-        const pdfParse = await import('pdf-parse');
-        const parsePdf = (pdfParse as any).default || pdfParse;
+        const { PDFParse } = await import('pdf-parse');
         const buf = Buffer.from(base64Pdf, 'base64');
-        const pdfData = await parsePdf(buf);
-        if (pdfData && pdfData.text) {
-          extractedText = pdfData.text;
+        const parser = new (PDFParse as any)({ data: new Uint8Array(buf) });
+        await parser.load();
+        const result = await parser.getText();
+        if (result && result.text) {
+          extractedText = result.text;
+        } else if (result && result.pages) {
+          extractedText = result.pages.map((p: any) => p.text || '').join('\n');
         }
       } catch (pdfErr) {
         console.error('pdf-parse error:', pdfErr);
