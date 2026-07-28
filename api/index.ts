@@ -410,10 +410,10 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
     const { text, base64Pdf } = req.body;
     let extractedText = text || '';
 
-    // If we got base64 PDF, extract text server-side using pdfjs-dist
+    // If we got base64 PDF, extract text server-side using pdfjs-dist legacy
     if (base64Pdf && (!extractedText || extractedText.trim().length < 20)) {
       try {
-        const pdfjsLib = await import('pdfjs-dist');
+        const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
         const buf = Buffer.from(base64Pdf, 'base64');
         const data = new Uint8Array(buf);
         const pdf = await (pdfjsLib as any).getDocument({ data, useSystemFonts: true, isEvalSupported: false }).promise;
@@ -422,7 +422,7 @@ app.post('/api/ai/scan-pdf', async (req, res) => {
           const content = await page.getTextContent();
           extractedText += content.items.map((it: any) => it.str).join(' ') + '\n';
         }
-        console.log('pdfjs-dist extracted', extractedText.length, 'chars');
+        console.log('pdfjs-dist legacy extracted', extractedText.length, 'chars');
       } catch (pdfErr) {
         console.error('pdfjs-dist extraction error:', pdfErr);
       }
