@@ -140,7 +140,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const t = AUTH_TEXTS[currentLanguage] || AUTH_TEXTS.uk;
 
-  const [authMethod, setAuthMethod] = useState<'social' | 'email' | 'phone'>('social');
+  const [authMethod, setAuthMethod] = useState<'social' | 'email' | 'phone'>('email');
 
   // Email form state
   const [email, setEmail] = useState('');

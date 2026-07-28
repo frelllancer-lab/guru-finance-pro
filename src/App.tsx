@@ -453,16 +453,11 @@ export default function App() {
             console.warn('pdfjs failed:', pdfErr);
           }
 
-          // Convert to base64 (only if small enough for API)
-          if (bytes.length < 3_500_000) {
+          // Convert to base64 (safe for mobile - uses TextDecoder)
+          if (bytes.length < 5_000_000) {
             try {
-              let binary = '';
-              const chunkSize = 8192;
-              for (let i = 0; i < bytes.length; i += chunkSize) {
-                const chunk = bytes.subarray(i, i + chunkSize);
-                binary += String.fromCharCode.apply(null, chunk as any);
-              }
-              base64Pdf = btoa(binary);
+              const decoder = new TextDecoder('latin1');
+              base64Pdf = btoa(decoder.decode(bytes));
             } catch (e) {
               console.warn('base64 failed:', e);
             }
@@ -471,7 +466,7 @@ export default function App() {
           const res = await fetch('/api/ai/scan-pdf', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: fullText, base64Pdf }),
+            body: JSON.stringify(fullText.length > 100 ? { text: fullText } : { base64Pdf }),
           });
 
           const result = await res.json();
@@ -749,19 +744,36 @@ export default function App() {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const bytes = new Uint8Array(arrayBuffer);
       let fullText = '';
+      let base64Pdf = '';
 
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
+      // Try pdfjs text extraction
+      try {
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          fullText += content.items.map((it: any) => it.str).join(' ') + '\n';
+        }
+      } catch (pdfErr) {
+        console.warn('pdfjs failed:', pdfErr);
+      }
+
+      // Convert to base64 (safe for mobile - uses TextDecoder)
+      if (bytes.length < 5_000_000) {
+        try {
+          const decoder = new TextDecoder('latin1');
+          base64Pdf = btoa(decoder.decode(bytes));
+        } catch (e) {
+          console.warn('base64 failed:', e);
+        }
       }
 
       const res = await fetch('/api/ai/scan-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: fullText }),
+        body: JSON.stringify(fullText.length > 100 ? { text: fullText } : { base64Pdf }),
       });
 
       const result = await res.json();
