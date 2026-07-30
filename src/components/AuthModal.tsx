@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   LogOut,
@@ -14,14 +14,12 @@ import {
 import { UserProfile } from '../types';
 import {
   loginWithGoogle,
-  loginWithApple,
   loginWithEmail,
-  setupRecaptcha,
-  sendPhoneCode,
   sendResetPasswordEmail,
   logoutUser,
-} from '../lib/firebase';
-import { ConfirmationResult } from 'firebase/auth';
+} from '../lib/supabase';
+import { setupRecaptcha, sendPhoneCode } from '../lib/firebase';
+import type { ConfirmationResult } from '../lib/firebase';
 import { Language } from '../i18n/translations';
 
 interface AuthModalProps {
@@ -42,7 +40,6 @@ const AUTH_TEXTS: Record<Language, {
   tabEmail: string;
   tabPhone: string;
   loginGoogle: string;
-  loginApple: string;
   emailLabel: string;
   passwordLabel: string;
   hasAccount: string;
@@ -71,7 +68,6 @@ const AUTH_TEXTS: Record<Language, {
     tabEmail: 'Email',
     tabPhone: 'Телефон',
     loginGoogle: 'Увійти через Google',
-    loginApple: 'Увійти через Apple ID',
     emailLabel: 'Електронна пошта (Email)',
     passwordLabel: 'Пароль',
     hasAccount: 'Вже є акаунт? Увійти',
@@ -84,7 +80,7 @@ const AUTH_TEXTS: Record<Language, {
     smsCodeLabel: 'Код із SMS повідомлення',
     confirmSmsBtn: 'Підтвердити та увійти',
     resendSms: 'Надіслати код повторно',
-    socialNote: 'Якщо Google/Apple не працюють — скористайтеся вкладкою Email для швидкої реєстрації.',
+    socialNote: 'Якщо Google не працює — скористайтеся вкладкою Email для швидкої реєстрації.',
     forgotPassword: 'Забули пароль?',
     resetSent: 'Лист із посиланням для відновлення пароля надіслано на пошту.',
     backToLogin: 'Повернутися до входу',
@@ -100,7 +96,6 @@ const AUTH_TEXTS: Record<Language, {
     tabEmail: 'Email',
     tabPhone: 'Phone',
     loginGoogle: 'Sign in with Google',
-    loginApple: 'Sign in with Apple ID',
     emailLabel: 'Email Address',
     passwordLabel: 'Password',
     hasAccount: 'Already have an account? Sign In',
@@ -113,7 +108,7 @@ const AUTH_TEXTS: Record<Language, {
     smsCodeLabel: 'SMS Code',
     confirmSmsBtn: 'Confirm & Sign In',
     resendSms: 'Resend code',
-    socialNote: 'If Google/Apple don\'t work, use the Email tab for quick registration.',
+    socialNote: 'If Google doesn\'t work, use the Email tab for quick registration.',
     forgotPassword: 'Forgot password?',
     resetSent: 'A password reset link has been sent to your email.',
     backToLogin: 'Back to login',
@@ -129,7 +124,6 @@ const AUTH_TEXTS: Record<Language, {
     tabEmail: 'Email',
     tabPhone: 'Телефон',
     loginGoogle: 'Войти через Google',
-    loginApple: 'Войти через Apple ID',
     emailLabel: 'Электронная почта (Email)',
     passwordLabel: 'Пароль',
     hasAccount: 'Уже есть аккаунт? Войти',
@@ -142,7 +136,7 @@ const AUTH_TEXTS: Record<Language, {
     smsCodeLabel: 'Код из SMS сообщения',
     confirmSmsBtn: 'Подтвердить и войти',
     resendSms: 'Отправить код заново',
-    socialNote: 'Если Google/Apple не работают — используйте вкладку Email для быстрой регистрации.',
+    socialNote: 'Если Google не работает — используйте вкладку Email для быстрой регистрации.',
     forgotPassword: 'Забыли пароль?',
     resetSent: 'Письмо со ссылкой для восстановления пароля отправлено на почту.',
     backToLogin: 'Вернуться к входу',
@@ -182,24 +176,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setError(null);
     try {
       await loginWithGoogle();
-      onClose();
     } catch (err: any) {
       console.error('Google Auth Error:', err);
-      if (err?.code === 'auth/popup-blocked') {
+      if (err?.message?.includes('popup')) {
         setError(
           currentLanguage === 'uk'
             ? 'Спливаюче вікно заблоковано браузером. Дозвольте спливаючі вікна або скористайтеся Email.'
             : currentLanguage === 'en'
             ? 'Popup was blocked by your browser. Please allow popups or use Email.'
             : 'Всплывающее окно заблокировано браузером. Разрешите всплывающие окна или используйте Email.'
-        );
-      } else if (err?.code === 'auth/unauthorized-domain') {
-        setError(
-          currentLanguage === 'uk'
-            ? 'Цей домен ще не додано до авторизованих у Firebase. Скористайтеся Email.'
-            : currentLanguage === 'en'
-            ? 'Domain not authorized in Firebase Console. Please use Email.'
-            : 'Этот домен не авторизован в Firebase. Используйте Email.'
         );
       } else {
         setError(
@@ -208,61 +193,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             : currentLanguage === 'en'
             ? 'Failed to sign in with Google. Try again or use Email.'
             : 'Не удалось войти через Google. Попробуйте еще раз или используйте Email.'
-        );
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAppleLogin = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      await loginWithApple();
-      onClose();
-    } catch (err: any) {
-      console.error('Apple Auth Error:', err);
-      const code = err?.code || '';
-      if (code === 'auth/operation-not-allowed') {
-        setError(
-          currentLanguage === 'uk'
-            ? 'Вхід через Apple не увімкнено в консолі Firebase. Будь ласка, скористайтеся Google, Email або Телефоном.'
-            : currentLanguage === 'en'
-            ? 'Apple Sign-In is not enabled in Firebase Console. Please use Google, Email, or Phone.'
-            : 'Вход через Apple не включен в консоли Firebase. Пожалуйста, используйте Google, Email или Телефон.'
-        );
-      } else if (code === 'auth/popup-blocked') {
-        setError(
-          currentLanguage === 'uk'
-            ? 'Спливаюче вікно Apple заблоковано браузером. Дозвольте спливаючі вікна або використайте Email/Телефон.'
-            : currentLanguage === 'en'
-            ? 'Apple popup was blocked by browser. Please allow popups or use Email/Phone.'
-            : 'Всплывающее окно Apple заблокировано браузером. Разрешите всплывающие окна или используйте Email/Телефон.'
-        );
-      } else if (code === 'auth/unauthorized-domain') {
-        setError(
-          currentLanguage === 'uk'
-            ? 'Домен розробки не додано до авторизованих у Firebase. Скористайтеся Email або Телефоном.'
-            : currentLanguage === 'en'
-            ? 'Development domain not authorized in Firebase Console. Please use Email or Phone.'
-            : 'Домен разработки не добавлен в разрешенные домены Firebase. Воспользуйтесь Email или Телефоном.'
-        );
-      } else if (code === 'auth/popup-closed-by-user') {
-        setError(
-          currentLanguage === 'uk'
-            ? 'Вікно входу Apple було закрито.'
-            : currentLanguage === 'en'
-            ? 'Apple sign-in window was closed.'
-            : 'Окно входа Apple было закрыто.'
-        );
-      } else {
-        setError(
-          currentLanguage === 'uk'
-            ? 'Не вдалося увійти через Apple (потрібне налаштування Apple Services ID в Firebase). Скористайтеся Google, Email або Телефоном.'
-            : currentLanguage === 'en'
-            ? 'Failed to sign in with Apple (requires Apple Services ID setup in Firebase). Please use Google, Email, or Phone.'
-            : 'Не удалось войти через Apple (требуется настройка Apple Services ID в Firebase). Воспользуйтесь Google, Email или Телефоном.'
         );
       }
     } finally {
@@ -280,11 +210,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error(err);
-      if (err.code === 'auth/wrong-password') {
+      const msg = err?.message || '';
+      if (msg.includes('wrong password') || msg.includes('Invalid login credentials')) {
         setError(
           currentLanguage === 'uk' ? 'Невірний пароль.' : currentLanguage === 'en' ? 'Wrong password.' : 'Неверный пароль.'
         );
-      } else if (err.code === 'auth/email-already-in-use') {
+      } else if (msg.includes('already registered') || msg.includes('already exists')) {
         setError(
           currentLanguage === 'uk'
             ? 'Користувач із таким email вже існує. Спробуйте увійти.'
@@ -292,7 +223,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             ? 'Email already in use. Try logging in.'
             : 'Пользователь с таким email уже существует. Попробуйте войти.'
         );
-      } else if (err.code === 'auth/weak-password') {
+      } else if (msg.includes('weak password') || msg.includes('at least 6')) {
         setError(
           currentLanguage === 'uk'
             ? 'Пароль занадто короткий (мінімум 6 символів).'
@@ -331,8 +262,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setResetSent(true);
     } catch (err: any) {
       console.error(err);
+      const msg = err?.message || '';
       setError(
-        err.code === 'auth/user-not-found'
+        msg.includes('not found')
           ? (currentLanguage === 'uk' ? 'Користувача з таким email не знайдено.'
              : currentLanguage === 'en' ? 'No account found with this email.'
              : 'Пользователь с таким email не найден.')
@@ -410,6 +342,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setLoading(false);
     }
   };
+
+  // Handle redirect from Google OAuth
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('error')) {
+      setError(
+        currentLanguage === 'uk'
+          ? 'Не вдалося увійти через Google. Спробуйте Email.'
+          : currentLanguage === 'en'
+          ? 'Google login failed. Try Email.'
+          : 'Не удалось войти через Google. Попробуйте Email.'
+      );
+    }
+  }, []);
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -547,18 +493,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.1 5.2C40.5 36 43.5 30.5 43.5 24c0-1.2-.1-2.3-.3-3.5z" />
                   </svg>
                   <span>{t.loginGoogle}</span>
-                </button>
-
-                <button
-                  onClick={handleAppleLogin}
-                  disabled={loading}
-                  className="oauth-btn w-full py-3.5 rounded-2xl text-xs font-extrabold flex items-center justify-center gap-3 transition active:scale-98 shadow-xs"
-                  style={{ background: 'var(--text)', color: 'var(--bg)' }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 384 512" fill="currentColor">
-                    <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141 0 184.8 0 273.5c0 26.2 4.8 53.3 14.4 81.2 12.8 37 59 127.6 107.2 126.1 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-83 102.6-120.1-65.2-30.7-57.7-90-57.7-91.9zM255.7 89.5c26.9-32 24.5-61.2 23.7-71.5-23.8 1.4-51.4 16.4-67.1 34.9-17.4 19.8-27.6 44.4-25.4 71.9 25.9 2 49.5-11.3 68.8-35.3z" />
-                  </svg>
-                  <span>{t.loginApple}</span>
                 </button>
               </div>
             )}

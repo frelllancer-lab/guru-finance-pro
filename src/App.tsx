@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { Camera, Plus, Brain, RefreshCw, ArrowLeft, Zap } from 'lucide-react';
-import { onAuthStateChanged } from 'firebase/auth';
 import {
-  auth,
+  onAuthStateChange,
   subscribeToUserData,
   saveUserDataToFirestore,
   checkUserDocExists,
-} from './lib/firebase';
+  getCurrentUser,
+} from './lib/supabase';
 import { Language, getSystemLanguage, translations } from './i18n/translations';
 import {
   Currency,
@@ -176,34 +176,32 @@ export default function App() {
     localStorage.setItem('ios_finance_category_limits', JSON.stringify(categoryLimits));
   }, [categoryLimits]);
 
-  // Firebase Auth Listener & Real-time Cloud Syncing
+  // Supabase Auth Listener & Real-time Cloud Syncing
   useEffect(() => {
     let unsubscribeFirestore: (() => void) | null = null;
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
+    const unsubscribeAuth = onAuthStateChange(async (user) => {
+      if (user) {
+        const meta = user.user_metadata || {};
         setUserProfile({
           isLoggedIn: true,
           isCloudSynced: true,
-          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Пользователь',
-          email: firebaseUser.email || undefined,
-          photoURL: firebaseUser.photoURL || undefined,
-          phoneNumber: firebaseUser.phoneNumber || undefined,
+          displayName: meta.display_name || meta.full_name || user.email?.split('@')[0] || 'Користувач',
+          email: user.email || undefined,
+          photoURL: meta.avatar_url || meta.picture || undefined,
+          phoneNumber: user.phone || undefined,
         });
 
-        // Check if user already has cloud data
-        const userExists = await checkUserDocExists(firebaseUser.uid);
+        const userExists = await checkUserDocExists(user.id);
         if (!userExists) {
-          // Sync current local state to cloud on first login
-          await saveUserDataToFirestore(firebaseUser.uid, {
+          await saveUserDataToFirestore(user.id, {
             accounts: bankAccounts,
             transactions: transactions,
             categoryLimits: categoryLimits as any,
           });
         }
 
-        // Subscribe to real-time changes from Firestore
-        unsubscribeFirestore = subscribeToUserData(firebaseUser.uid, (cloudData) => {
+        unsubscribeFirestore = subscribeToUserData(user.id, (cloudData) => {
           if (cloudData.accounts && cloudData.accounts.length > 0) {
             setBankAccounts(cloudData.accounts);
           }
@@ -234,15 +232,19 @@ export default function App() {
     };
   }, []);
 
-  // Sync mutations to Firestore if user is authenticated
+  // Sync mutations to cloud if user is authenticated
   useEffect(() => {
-    if (auth.currentUser?.uid) {
-      saveUserDataToFirestore(auth.currentUser.uid, {
-        accounts: bankAccounts,
-        transactions: transactions,
-        categoryLimits: categoryLimits as any,
-      });
-    }
+    const sync = async () => {
+      const { data } = await getCurrentUser();
+      if (data.user?.id) {
+        saveUserDataToFirestore(data.user.id, {
+          accounts: bankAccounts,
+          transactions: transactions,
+          categoryLimits: categoryLimits as any,
+        });
+      }
+    };
+    sync();
   }, [bankAccounts, transactions, categoryLimits]);
 
   // Fetch online exchange rate on start
